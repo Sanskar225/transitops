@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: #06080D;
+    background-image: radial-gradient(circle at 20% 0%, rgba(242, 200, 121, 0.04), transparent 40%);
+  }
+  ::selection {
+    background: rgba(242, 200, 121, 0.25);
+  }
+  *:focus-visible {
+    outline: 2px solid #F2C879;
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-panel border border-border rounded-card shadow-panel;
+  }
+  .input {
+    @apply w-full bg-void border border-border rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-beacon transition-colors;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-beacon text-void hover:bg-[#f5d493];
+  }
+  .btn-secondary {
+    @apply btn bg-panel2 text-ink border border-border hover:border-beacon-dim;
+  }
+  .btn-danger {
+    @apply btn bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:text-ink hover:bg-panel2;
+  }
+  .label {
+    @apply block text-xs font-medium text-muted mb-1.5 tracking-wide;
+  }
+}
+
+/* Beacon ticker marquee */
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.ticker-track {
+  animation: ticker-scroll 28s linear infinite;
+}

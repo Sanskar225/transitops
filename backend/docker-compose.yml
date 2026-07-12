@@ -30,9 +30,9 @@ services:
       retries: 10
 
   migrate:
-    build: ./backend
+    build: .
     command: sh -c "npx prisma migrate deploy && node prisma/seed.js"
-    env_file: ./backend/.env
+    env_file: .env
     environment:
       DATABASE_URL: postgresql://transitops:transitops@postgres:5432/transitops?schema=public
       REDIS_URL: redis://redis:6379
@@ -41,15 +41,14 @@ services:
         condition: service_healthy
 
   api:
-    build: ./backend
+    build: .
     restart: unless-stopped
     command: node src/server.js
-    env_file: ./backend/.env
+    env_file: .env
     environment:
       DATABASE_URL: postgresql://transitops:transitops@postgres:5432/transitops?schema=public
       REDIS_URL: redis://redis:6379
       RUN_WORKER_IN_PROCESS: "false"
-      CORS_ORIGIN: http://localhost:8080
     ports:
       - "4000:4000"
     volumes:
@@ -64,10 +63,10 @@ services:
         condition: service_completed_successfully
 
   worker:
-    build: ./backend
+    build: .
     restart: unless-stopped
     command: node src/queues/notificationWorker.js
-    env_file: ./backend/.env
+    env_file: .env
     environment:
       DATABASE_URL: postgresql://transitops:transitops@postgres:5432/transitops?schema=public
       REDIS_URL: redis://redis:6379
@@ -78,18 +77,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_URL: http://localhost:4000/api
-        VITE_SOCKET_URL: http://localhost:4000
-    restart: unless-stopped
-    ports:
-      - "8080:80"
-    depends_on:
-      - api
 
 volumes:
   pgdata:
