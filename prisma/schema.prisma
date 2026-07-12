@@ -1,0 +1,261 @@
+// TransitOps - Prisma Schema
+// Notes on concurrency safety:
+// - Vehicle, Driver, Trip carry a `version` Int column used for optimistic locking
+//   on fields edited concurrently by multiple managers (e.g. fuel cost, capacity).
+// - Critical state transitions (dispatch/complete/cancel/maintenance open-close)
+//   are performed inside DB transactions using `SELECT ... FOR UPDATE` pessimistic
+//   row locks (see src/utils/txLock.js), not just optimistic `version` checks.
+// - Lock ordering across a single transaction is ALWAYS Vehicle -> Driver -> Trip
+//   to prevent deadlocks (see docs/CONCURRENCY.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  FLEET_MANAGER
+  DRIVER
+  VIEWER
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  ON_TRIP
+  IN_SHOP
+  RETIRED
+}
+
+enum DriverStatus {
+  AVAILABLE
+  ON_TRIP
+  OFF_DUTY
+  SUSPENDED
+}
+
+enum TripStatus {
+  DRAFT
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum MaintenanceStatus {
+  OPEN
+  CLOSED
+}
+
+enum NotificationType {
+  LICENSE_EXPIRY
+  MAINTENANCE_DUE
+  TRIP_EVENT
+  SYSTEM
+}
+
+enum NotificationChannel {
+  EMAIL
+  SOCKET
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         RoleName @default(VIEWER)
+  isActive     Boolean  @default(true)
+  driverId     String?  @unique
+  driver       Driver?  @relation(fields: [driverId], references: [id])
+  refreshTokens RefreshToken[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs    AuditLog[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Vehicle {
+  id                  String        @id @default(uuid())
+  registrationNumber  String        @unique
+  make                String?
+  model               String?
+  year                Int?
+  maxLoadCapacityKg   Float
+  acquisitionCost     Float         @default(0)
+  currentOdometerKm   Float         @default(0)
+  odometerAtLastSvcKm Float         @default(0)
+  serviceIntervalKm   Float         @default(5000)
+  status              VehicleStatus @default(AVAILABLE)
+  version             Int           @default(0) // optimistic locking
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  trips               Trip[]
+  maintenanceLogs      MaintenanceLog[]
+  fuelLogs             FuelLog[]
+  expenses             Expense[]
+  documents            VehicleDocument[]
+
+  @@index([status])
+}
+
+model Driver {
+  id                String       @id @default(uuid())
+  name              String
+  licenseNumber     String       @unique
+  licenseCategory   String?
+  licenseExpiryDate DateTime
+  contactNumber     String?
+  safetyScore       Float        @default(80)
+  status            DriverStatus @default(AVAILABLE)
+  version           Int          @default(0) // optimistic locking
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  user              User?
+  trips             Trip[]
+
+  @@index([status])
+  @@index([licenseExpiryDate])
+}
+
+model Trip {
+  id                String     @id @default(uuid())
+  source            String
+  destination       String
+  cargoWeightKg     Float
+  plannedDistanceKm Float
+  actualDistanceKm  Float?
+  startOdometerKm   Float?
+  endOdometerKm     Float?
+  fuelConsumedL     Float?
+  status            TripStatus @default(DRAFT)
+  version           Int        @default(0)
+
+  vehicleId         String
+  vehicle           Vehicle    @relation(fields: [vehicleId], references: [id])
+  driverId          String
+  driver            Driver     @relation(fields: [driverId], references: [id])
+
+  dispatchedAt      DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+
+  createdById       String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@index([status])
+  @@index([vehicleId])
+  @@index([driverId])
+}
+
+model MaintenanceLog {
+  id          String             @id @default(uuid())
+  vehicleId   String
+  vehicle     Vehicle            @relation(fields: [vehicleId], references: [id])
+  description String
+  cost        Float              @default(0)
+  status      MaintenanceStatus  @default(OPEN)
+  odometerAtServiceKm Float?
+  openedAt    DateTime           @default(now())
+  closedAt    DateTime?
+  version     Int                @default(0)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([vehicleId, status])
+}
+
+model FuelLog {
+  id        String   @id @default(uuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  liters    Float
+  cost      Float
+  odometerKm Float?
+  date      DateTime @default(now())
+  version   Int      @default(0) // optimistic locking - see rule #5 "Lost Update Problem"
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId])
+}
+
+model Expense {
+  id        String   @id @default(uuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  type      String   // toll, fine, misc, maintenance-related, etc.
+  amount    Float
+  date      DateTime @default(now())
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId])
+}
+
+model VehicleDocument {
+  id        String   @id @default(uuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  fileName  String
+  filePath  String
+  mimeType  String?
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String   // CREATE, UPDATE, DELETE
+  entity     String   // e.g. "Vehicle", "FuelLog"
+  entityId   String
+  oldValue   Json?
+  newValue   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entity, entityId])
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  type      NotificationType
+  channel   NotificationChannel @default(SOCKET)
+  title     String
+  message   String
+  meta      Json?
+  read      Boolean             @default(false)
+  createdAt DateTime            @default(now())
+
+  @@index([type])
+}
+
+// Simple idempotency key store for POST endpoints that must not double-process
+// (e.g. duplicate "Complete Trip" clicks arriving as separate HTTP requests).
+model IdempotencyKey {
+  key        String   @id
+  responseBody Json?
+  statusCode Int?
+  createdAt  DateTime @default(now())
+}
